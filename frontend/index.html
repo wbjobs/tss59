@@ -1,0 +1,728 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>3D 声学可视化 - 镜像法</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; overflow: hidden; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    #app { display: flex; width: 100%; height: 100%; }
+    #scene-container { flex: 1; position: relative; background: #1a1a2e; }
+    #canvas-container { width: 100%; height: 100%; }
+    #sidebar {
+      width: 360px;
+      background: #16213e;
+      color: #eee;
+      padding: 20px;
+      overflow-y: auto;
+      border-left: 1px solid #0f3460;
+    }
+    h1 { font-size: 18px; margin-bottom: 16px; color: #e94560; border-bottom: 1px solid #0f3460; padding-bottom: 10px; }
+    h2 { font-size: 14px; margin: 18px 0 10px; color: #53a8b6; }
+    .control-group { margin-bottom: 14px; }
+    .control-group label {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 13px;
+      margin-bottom: 5px;
+      color: #bbb;
+    }
+    .control-group label span:last-child { color: #53a8b6; font-weight: bold; }
+    .control-group input[type=range] {
+      width: 100%;
+      accent-color: #e94560;
+    }
+    .btn {
+      width: 100%;
+      padding: 12px;
+      background: #e94560;
+      color: white;
+      border: none;
+      border-radius: 6px;
+      font-size: 15px;
+      font-weight: bold;
+      cursor: pointer;
+      margin-top: 10px;
+      transition: background 0.2s;
+    }
+    .btn:hover { background: #d63851; }
+    .btn:disabled { background: #555; cursor: not-allowed; }
+    .legend { display: flex; gap: 15px; margin: 10px 0; font-size: 12px; flex-wrap: wrap; }
+    .legend-item { display: flex; align-items: center; gap: 6px; }
+    .legend-dot { width: 12px; height: 12px; border-radius: 50%; }
+    .path-list { margin-top: 10px; max-height: 400px; overflow-y: auto; }
+    .path-item {
+      background: #0f3460;
+      padding: 10px;
+      margin-bottom: 8px;
+      border-radius: 5px;
+      font-size: 12px;
+      cursor: pointer;
+      border-left: 4px solid transparent;
+      transition: all 0.2s;
+    }
+    .path-item:hover { background: #1a4a8a; }
+    .path-item.active { border-left-color: #e94560; background: #1a4a8a; }
+    .path-meta { display: flex; justify-content: space-between; margin-top: 4px; color: #bbb; }
+    .path-tag {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 10px;
+      font-size: 10px;
+      font-weight: bold;
+    }
+    .tag-direct { background: #4caf50; color: white; }
+    .tag-order-1 { background: #2196f3; color: white; }
+    .tag-order-2 { background: #ff9800; color: white; }
+    .tag-order-3 { background: #f44336; color: white; }
+    .hint {
+      font-size: 11px;
+      color: #888;
+      margin-top: 10px;
+      line-height: 1.6;
+      padding: 8px;
+      background: #0f3460;
+      border-radius: 4px;
+    }
+    .status-bar {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      background: rgba(0,0,0,0.7);
+      color: white;
+      padding: 8px 14px;
+      border-radius: 5px;
+      font-size: 12px;
+      z-index: 10;
+    }
+    .checkbox-group { display: flex; gap: 10px; font-size: 12px; flex-wrap: wrap; }
+    .checkbox-group label { display: flex; align-items: center; gap: 5px; cursor: pointer; }
+  </style>
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js"
+      }
+    }
+  </script>
+</head>
+<body>
+  <div id="app">
+    <div id="scene-container">
+      <div class="status-bar" id="status-bar">状态：就绪</div>
+      <div id="canvas-container"></div>
+    </div>
+    <div id="sidebar">
+      <h1>🎵 3D 声学可视化</h1>
+
+      <h2>📐 房间尺寸</h2>
+      <div class="control-group">
+        <label>宽度 (X) <span id="val-width">5.0 m</span></label>
+        <input type="range" id="input-width" min="1" max="20" step="0.1" value="5" />
+      </div>
+      <div class="control-group">
+        <label>高度 (Y) <span id="val-height">3.0 m</span></label>
+        <input type="range" id="input-height" min="1" max="20" step="0.1" value="3" />
+      </div>
+      <div class="control-group">
+        <label>深度 (Z) <span id="val-depth">4.0 m</span></label>
+        <input type="range" id="input-depth" min="1" max="20" step="0.1" value="4" />
+      </div>
+
+      <h2>📍 当前坐标</h2>
+      <div class="control-group" style="font-size:12px; color:#bbb; background:#0f3460; padding:8px; border-radius:4px;">
+        <div>🔴 声源: <span id="source-coord" style="color:#ff6b6b;">(1.0, 1.5, 1.0)</span></div>
+        <div>🔵 接收: <span id="receiver-coord" style="color:#4ecdc4;">(3.5, 1.5, 2.5)</span></div>
+      </div>
+
+      <h2>🖌️ 显示选项</h2>
+      <div class="checkbox-group">
+        <label><input type="checkbox" id="chk-direct" checked />直达声</label>
+        <label><input type="checkbox" id="chk-order1" checked />1阶反射</label>
+        <label><input type="checkbox" id="chk-order2" checked />2阶反射</label>
+        <label><input type="checkbox" id="chk-order3" />3阶反射</label>
+        <label><input type="checkbox" id="chk-image" />镜像点</label>
+      </div>
+
+      <button class="btn" id="btn-compute">🚀 计算反射路径</button>
+
+      <h2>📊 路径结果 <span id="path-count" style="font-weight:normal; color:#888; font-size:12px;"></span></h2>
+      <div class="legend">
+        <div class="legend-item"><div class="legend-dot" style="background:#4caf50;"></div>直达</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#2196f3;"></div>1阶</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#ff9800;"></div>2阶</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#f44336;"></div>3阶</div>
+      </div>
+      <div class="path-list" id="path-list">
+        <div style="color:#888; font-size:12px; text-align:center; padding:20px;">点击"计算反射路径"以查看结果</div>
+      </div>
+
+      <div class="hint">
+        💡 操作提示：<br/>
+        • 左键拖动：旋转视角<br/>
+        • 右键拖动：平移视角<br/>
+        • 滚轮：缩放<br/>
+        • 拖拽红/蓝小球：移动声源/接收点
+      </div>
+    </div>
+  </div>
+
+  <script type="module">
+    import * as THREE from 'three';
+
+    const API_URL = 'http://localhost:5000/compute';
+
+    let scene, camera, renderer;
+    let roomMesh, roomEdges;
+    let sourceMesh, receiverMesh;
+    let raycaster, mouse;
+    let isDragging = false;
+    let draggedObject = null;
+    let dragPlane = new THREE.Plane();
+    let offset = new THREE.Vector3();
+    let intersection = new THREE.Vector3();
+    let pathObjects = [];
+    let imagePointObjects = [];
+    let allPaths = [];
+    let activePathIndex = -1;
+
+    let state = {
+      width: 5,
+      height: 3,
+      depth: 4,
+      source: new THREE.Vector3(1, 1.5, 1),
+      receiver: new THREE.Vector3(3.5, 1.5, 2.5)
+    };
+
+    function init() {
+      const container = document.getElementById('canvas-container');
+      const w = container.clientWidth;
+      const h = container.clientHeight;
+
+      scene = new THREE.Scene();
+      scene.background = new THREE.Color(0x1a1a2e);
+      scene.fog = new THREE.Fog(0x1a1a2e, 20, 80);
+
+      camera = new THREE.PerspectiveCamera(50, w / h, 0.1, 500);
+      const maxDim = Math.max(state.width, state.height, state.depth);
+      camera.position.set(maxDim * 1.5, maxDim * 1.2, maxDim * 1.8);
+      camera.lookAt(state.width / 2, state.height / 2, state.depth / 2);
+
+      renderer = new THREE.WebGLRenderer({ antialias: true });
+      renderer.setSize(w, h);
+      renderer.setPixelRatio(window.devicePixelRatio);
+      container.appendChild(renderer.domElement);
+
+      const ambient = new THREE.AmbientLight(0xffffff, 0.5);
+      scene.add(ambient);
+      const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+      dirLight.position.set(10, 20, 10);
+      scene.add(dirLight);
+      const backLight = new THREE.DirectionalLight(0x8888ff, 0.3);
+      backLight.position.set(-10, 5, -10);
+      scene.add(backLight);
+
+      const gridHelper = new THREE.GridHelper(30, 30, 0x0f3460, 0x0f3460);
+      gridHelper.position.y = -0.01;
+      scene.add(gridHelper);
+
+      const axesHelper = new THREE.AxesHelper(2);
+      axesHelper.position.set(-0.1, 0, -0.1);
+      scene.add(axesHelper);
+
+      buildRoom();
+      buildPoints();
+      setupOrbitControls();
+      setupDragInteraction();
+      bindUI();
+      updateUILabels();
+
+      window.addEventListener('resize', onResize);
+      animate();
+    }
+
+    function buildRoom() {
+      if (roomMesh) scene.remove(roomMesh);
+      if (roomEdges) scene.remove(roomEdges);
+
+      const geom = new THREE.BoxGeometry(state.width, state.height, state.depth);
+      const mat = new THREE.MeshStandardMaterial({
+        color: 0x53a8b6,
+        transparent: true,
+        opacity: 0.08,
+        side: THREE.DoubleSide,
+        metalness: 0.1,
+        roughness: 0.9
+      });
+      roomMesh = new THREE.Mesh(geom, mat);
+      roomMesh.position.set(state.width / 2, state.height / 2, state.depth / 2);
+      scene.add(roomMesh);
+
+      const edgesGeom = new THREE.EdgesGeometry(geom);
+      const edgesMat = new THREE.LineBasicMaterial({ color: 0x53a8b6, transparent: true, opacity: 0.6 });
+      roomEdges = new THREE.LineSegments(edgesGeom, edgesMat);
+      roomEdges.position.copy(roomMesh.position);
+      scene.add(roomEdges);
+
+      const facesGeom = new THREE.BoxGeometry(state.width, state.height, state.depth);
+      const faceMat = new THREE.MeshBasicMaterial({
+        color: 0xffffff,
+        transparent: true,
+        opacity: 0.02,
+        side: THREE.DoubleSide,
+        depthWrite: false
+      });
+      const faces = new THREE.Mesh(facesGeom, faceMat);
+      faces.position.copy(roomMesh.position);
+      faces.userData.isRoomFace = true;
+      scene.add(faces);
+    }
+
+    function buildPoints() {
+      if (sourceMesh) scene.remove(sourceMesh);
+      if (receiverMesh) scene.remove(receiverMesh);
+
+      const sourceGeom = new THREE.SphereGeometry(0.12, 24, 24);
+      const sourceMat = new THREE.MeshStandardMaterial({
+        color: 0xff4444,
+        emissive: 0xff0000,
+        emissiveIntensity: 0.5,
+        metalness: 0.3,
+        roughness: 0.5
+      });
+      sourceMesh = new THREE.Mesh(sourceGeom, sourceMat);
+      sourceMesh.position.copy(state.source);
+      sourceMesh.userData.isDraggable = true;
+      sourceMesh.userData.type = 'source';
+      scene.add(sourceMesh);
+
+      const sourceGlowGeom = new THREE.SphereGeometry(0.2, 16, 16);
+      const sourceGlowMat = new THREE.MeshBasicMaterial({ color: 0xff0000, transparent: true, opacity: 0.15 });
+      const sourceGlow = new THREE.Mesh(sourceGlowGeom, sourceGlowMat);
+      sourceMesh.add(sourceGlow);
+
+      const receiverGeom = new THREE.SphereGeometry(0.12, 24, 24);
+      const receiverMat = new THREE.MeshStandardMaterial({
+        color: 0x4488ff,
+        emissive: 0x0044ff,
+        emissiveIntensity: 0.5,
+        metalness: 0.3,
+        roughness: 0.5
+      });
+      receiverMesh = new THREE.Mesh(receiverGeom, receiverMat);
+      receiverMesh.position.copy(state.receiver);
+      receiverMesh.userData.isDraggable = true;
+      receiverMesh.userData.type = 'receiver';
+      scene.add(receiverMesh);
+
+      const receiverGlowGeom = new THREE.SphereGeometry(0.2, 16, 16);
+      const receiverGlowMat = new THREE.MeshBasicMaterial({ color: 0x0066ff, transparent: true, opacity: 0.15 });
+      const receiverGlow = new THREE.Mesh(receiverGlowGeom, receiverGlowMat);
+      receiverMesh.add(receiverGlow);
+    }
+
+    function setupOrbitControls() {
+      const target = new THREE.Vector3(state.width / 2, state.height / 2, state.depth / 2);
+      let spherical = new THREE.Spherical();
+      spherical.setFromVector3(camera.position.clone().sub(target));
+      let isOrbitDrag = false;
+      let isPanDrag = false;
+      let lastMouse = { x: 0, y: 0 };
+      let panOffset = new THREE.Vector3();
+
+      function updateCamera() {
+        const offsetVec = new THREE.Vector3().setFromSpherical(spherical);
+        camera.position.copy(target).add(offsetVec).add(panOffset);
+        camera.lookAt(target.clone().add(panOffset));
+      }
+
+      renderer.domElement.addEventListener('pointerdown', (e) => {
+        if (draggedObject) return;
+        lastMouse.x = e.clientX;
+        lastMouse.y = e.clientY;
+        if (e.button === 0) isOrbitDrag = true;
+        else if (e.button === 2) isPanDrag = true;
+      });
+
+      renderer.domElement.addEventListener('pointermove', (e) => {
+        const dx = e.clientX - lastMouse.x;
+        const dy = e.clientY - lastMouse.y;
+        lastMouse.x = e.clientX;
+        lastMouse.y = e.clientY;
+
+        if (isOrbitDrag) {
+          spherical.theta -= dx * 0.005;
+          spherical.phi -= dy * 0.005;
+          spherical.phi = Math.max(0.05, Math.min(Math.PI - 0.05, spherical.phi));
+          updateCamera();
+        } else if (isPanDrag) {
+          const panScale = spherical.radius * 0.001;
+          const right = new THREE.Vector3();
+          const up = new THREE.Vector3(0, 1, 0);
+          camera.getWorldDirection(right);
+          right.cross(up).normalize();
+          panOffset.add(right.multiplyScalar(-dx * panScale));
+          panOffset.y += dy * panScale;
+          updateCamera();
+        }
+      });
+
+      renderer.domElement.addEventListener('pointerup', () => {
+        isOrbitDrag = false;
+        isPanDrag = false;
+      });
+
+      renderer.domElement.addEventListener('wheel', (e) => {
+        e.preventDefault();
+        spherical.radius *= (1 + e.deltaY * 0.001);
+        spherical.radius = Math.max(1, Math.min(100, spherical.radius));
+        updateCamera();
+      }, { passive: false });
+
+      renderer.domElement.addEventListener('contextmenu', (e) => e.preventDefault());
+    }
+
+    function setupDragInteraction() {
+      raycaster = new THREE.Raycaster();
+      mouse = new THREE.Vector2();
+      const dom = renderer.domElement;
+
+      dom.addEventListener('pointerdown', (e) => {
+        if (e.button !== 0) return;
+        const rect = dom.getBoundingClientRect();
+        mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+        mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+        raycaster.setFromCamera(mouse, camera);
+
+        const draggables = [sourceMesh, receiverMesh];
+        const intersects = raycaster.intersectObjects(draggables, true);
+
+        if (intersects.length > 0) {
+          let obj = intersects[0].object;
+          while (obj && !obj.userData.isDraggable) obj = obj.parent;
+          if (obj) {
+            isDragging = true;
+            draggedObject = obj;
+            dom.style.cursor = 'grabbing';
+
+            dragPlane.setFromNormalAndCoplanarPoint(
+              camera.getWorldDirection(dragPlane.normal).negate(),
+              draggedObject.position
+            );
+
+            if (raycaster.ray.intersectPlane(dragPlane, intersection)) {
+              offset.copy(draggedObject.position).sub(intersection);
+            }
+          }
+        }
+      });
+
+      dom.addEventListener('pointermove', (e) => {
+        if (isDragging && draggedObject) {
+          const rect = dom.getBoundingClientRect();
+          mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+          mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+          raycaster.setFromCamera(mouse, camera);
+
+          if (raycaster.ray.intersectPlane(dragPlane, intersection)) {
+            let newPos = intersection.add(offset);
+
+            newPos.x = Math.max(0.05, Math.min(state.width - 0.05, newPos.x));
+            newPos.y = Math.max(0.05, Math.min(state.height - 0.05, newPos.y));
+            newPos.z = Math.max(0.05, Math.min(state.depth - 0.05, newPos.z));
+
+            draggedObject.position.copy(newPos);
+
+            if (draggedObject.userData.type === 'source') {
+              state.source.copy(newPos);
+            } else {
+              state.receiver.copy(newPos);
+            }
+            updateUILabels();
+          }
+        } else {
+          const rect = dom.getBoundingClientRect();
+          mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+          mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+          raycaster.setFromCamera(mouse, camera);
+          const draggables = [sourceMesh, receiverMesh];
+          const intersects = raycaster.intersectObjects(draggables, true);
+          dom.style.cursor = intersects.length > 0 ? 'grab' : 'default';
+        }
+      });
+
+      dom.addEventListener('pointerup', () => {
+        if (isDragging) {
+          isDragging = false;
+          draggedObject = null;
+          renderer.domElement.style.cursor = 'default';
+        }
+      });
+    }
+
+    function bindUI() {
+      const inputs = [
+        { id: 'input-width', key: 'width', valId: 'val-width', suffix: ' m' },
+        { id: 'input-height', key: 'height', valId: 'val-height', suffix: ' m' },
+        { id: 'input-depth', key: 'depth', valId: 'val-depth', suffix: ' m' }
+      ];
+
+      inputs.forEach(({ id, key, valId, suffix }) => {
+        const el = document.getElementById(id);
+        const valEl = document.getElementById(valId);
+        el.addEventListener('input', () => {
+          state[key] = parseFloat(el.value);
+          valEl.textContent = state[key].toFixed(1) + suffix;
+          buildRoom();
+          buildPoints();
+          clearPaths();
+        });
+      });
+
+      document.getElementById('btn-compute').addEventListener('click', computePaths);
+
+      ['chk-direct', 'chk-order1', 'chk-order2', 'chk-order3', 'chk-image'].forEach(id => {
+        document.getElementById(id).addEventListener('change', renderAllPaths);
+      });
+    }
+
+    function updateUILabels() {
+      const fmt = (v) => `(${v.x.toFixed(2)}, ${v.y.toFixed(2)}, ${v.z.toFixed(2)})`;
+      document.getElementById('source-coord').textContent = fmt(state.source);
+      document.getElementById('receiver-coord').textContent = fmt(state.receiver);
+    }
+
+    function setStatus(text, color = '#fff') {
+      const bar = document.getElementById('status-bar');
+      bar.textContent = '状态：' + text;
+      bar.style.borderLeft = `4px solid ${color}`;
+    }
+
+    async function computePaths() {
+      setStatus('正在计算...', '#ffcc00');
+      const btn = document.getElementById('btn-compute');
+      btn.disabled = true;
+
+      const payload = {
+        room: { width: state.width, height: state.height, depth: state.depth },
+        source: [state.source.x, state.source.y, state.source.z],
+        receiver: [state.receiver.x, state.receiver.y, state.receiver.z],
+        max_order: 3
+      };
+
+      try {
+        const res = await fetch(API_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+
+        if (!res.ok) {
+          const err = await res.json();
+          throw new Error(err.error || '请求失败');
+        }
+
+        const data = await res.json();
+        allPaths = data.paths;
+        setStatus(`计算完成：找到 ${data.total_paths} 条路径`, '#4caf50');
+        renderAllPaths();
+        renderPathList();
+      } catch (err) {
+        console.error(err);
+        setStatus('错误: ' + err.message, '#ff4444');
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    function clearPaths() {
+      pathObjects.forEach(o => scene.remove(o));
+      imagePointObjects.forEach(o => scene.remove(o));
+      pathObjects = [];
+      imagePointObjects = [];
+      allPaths = [];
+      activePathIndex = -1;
+      document.getElementById('path-list').innerHTML = '<div style="color:#888; font-size:12px; text-align:center; padding:20px;">点击"计算反射路径"以查看结果</div>';
+      document.getElementById('path-count').textContent = '';
+    }
+
+    function getOrderColor(order, isDim = false) {
+      const colors = {
+        0: isDim ? 0x2a6e2e : 0x4caf50,
+        1: isDim ? 0x104870 : 0x2196f3,
+        2: isDim ? 0x704a00 : 0xff9800,
+        3: isDim ? 0x781a15 : 0xf44336
+      };
+      return colors[order] || (isDim ? 0x444444 : 0x999999);
+    }
+
+    function renderAllPaths() {
+      pathObjects.forEach(o => scene.remove(o));
+      imagePointObjects.forEach(o => scene.remove(o));
+      pathObjects = [];
+      imagePointObjects = [];
+
+      const showMap = {
+        0: document.getElementById('chk-direct').checked,
+        1: document.getElementById('chk-order1').checked,
+        2: document.getElementById('chk-order2').checked,
+        3: document.getElementById('chk-order3').checked
+      };
+      const showImages = document.getElementById('chk-image').checked;
+
+      allPaths.forEach((path, idx) => {
+        const show = showMap[path.order];
+        if (!show) return;
+        const isActive = idx === activePathIndex;
+        const opacity = isActive ? 1.0 : 0.35;
+        const lineWidth = isActive ? 0.04 : 0.015;
+
+        const pts = path.path_points.map(p => new THREE.Vector3(p[0], p[1], p[2]));
+        for (let i = 0; i < pts.length - 1; i++) {
+          const segGeom = new THREE.BufferGeometry().setFromPoints([pts[i], pts[i + 1]]);
+          const segMat = new THREE.LineBasicMaterial({
+            color: getOrderColor(path.order, !isActive),
+            transparent: true,
+            opacity: opacity
+          });
+          const line = new THREE.Line(segGeom, segMat);
+          scene.add(line);
+          pathObjects.push(line);
+        }
+
+        const tubePts = [];
+        for (let i = 0; i < pts.length - 1; i++) {
+          const a = pts[i], b = pts[i + 1];
+          for (let t = 0; t <= 10; t++) {
+            tubePts.push(a.clone().lerp(b, t / 10));
+          }
+        }
+        if (isActive && tubePts.length > 1) {
+          const curve = new THREE.CatmullRomCurve3(tubePts, false, 'catmullrom', 0);
+          const tubeGeom = new THREE.TubeGeometry(curve, 64, lineWidth, 8, false);
+          const tubeMat = new THREE.MeshBasicMaterial({
+            color: getOrderColor(path.order),
+            transparent: true,
+            opacity: 0.6
+          });
+          const tube = new THREE.Mesh(tubeGeom, tubeMat);
+          scene.add(tube);
+          pathObjects.push(tube);
+        }
+
+        if (path.order > 0) {
+          for (let i = 1; i < pts.length - 1; i++) {
+            const hitGeom = new THREE.SphereGeometry(isActive ? 0.07 : 0.04, 12, 12);
+            const hitMat = new THREE.MeshBasicMaterial({
+              color: getOrderColor(path.order),
+              transparent: true,
+              opacity: isActive ? 0.9 : 0.5
+            });
+            const hit = new THREE.Mesh(hitGeom, hitMat);
+            hit.position.copy(pts[i]);
+            scene.add(hit);
+            pathObjects.push(hit);
+          }
+        }
+
+        if (showImages && path.order > 0) {
+          const ip = path.image_point;
+          const imgGeom = new THREE.SphereGeometry(0.08, 12, 12);
+          const imgMat = new THREE.MeshBasicMaterial({
+            color: 0xff00ff,
+            transparent: true,
+            opacity: 0.6
+          });
+          const imgSphere = new THREE.Mesh(imgGeom, imgMat);
+          imgSphere.position.set(ip[0], ip[1], ip[2]);
+          scene.add(imgSphere);
+          imagePointObjects.push(imgSphere);
+
+          const linkGeom = new THREE.BufferGeometry().setFromPoints([
+            new THREE.Vector3(ip[0], ip[1], ip[2]),
+            pts[pts.length - 1]
+          ]);
+          const linkMat = new THREE.LineDashedMaterial({
+            color: 0xff00ff,
+            dashSize: 0.15,
+            gapSize: 0.1,
+            transparent: true,
+            opacity: 0.4
+          });
+          const link = new THREE.Line(linkGeom, linkMat);
+          link.computeLineDistances();
+          scene.add(link);
+          imagePointObjects.push(link);
+        }
+      });
+    }
+
+    function renderPathList() {
+      const list = document.getElementById('path-list');
+      document.getElementById('path-count').textContent = `共 ${allPaths.length} 条`;
+
+      if (allPaths.length === 0) {
+        list.innerHTML = '<div style="color:#888; font-size:12px; text-align:center; padding:20px;">暂无结果</div>';
+        return;
+      }
+
+      list.innerHTML = '';
+      allPaths.forEach((path, idx) => {
+        const item = document.createElement('div');
+        item.className = 'path-item' + (idx === activePathIndex ? ' active' : '');
+
+        let tagClass = 'tag-direct';
+        let label = '直达声';
+        if (path.order === 1) { tagClass = 'tag-order-1'; label = '1阶反射'; }
+        else if (path.order === 2) { tagClass = 'tag-order-2'; label = '2阶反射'; }
+        else if (path.order === 3) { tagClass = 'tag-order-3'; label = '3阶反射'; }
+
+        const td = path.time_diff_ms.toFixed(2);
+        const len = path.length.toFixed(3);
+
+        item.innerHTML = `
+          <div>
+            <span class="path-tag ${tagClass}">${label}</span>
+            <span style="margin-left:8px; color:#ccc;">#${idx + 1}</span>
+          </div>
+          <div class="path-meta">
+            <span>⏱ Δt = <b style="color:#fff;">${td} ms</b></span>
+            <span>📏 ${len} m</span>
+          </div>
+          ${path.order > 0 && path.image_n ? `<div class="path-meta" style="color:#888;">镜像索引: [${path.image_n.join(', ')}]</div>` : ''}
+        `;
+
+        item.addEventListener('click', () => {
+          activePathIndex = (activePathIndex === idx) ? -1 : idx;
+          renderPathList();
+          renderAllPaths();
+        });
+
+        list.appendChild(item);
+      });
+    }
+
+    function onResize() {
+      const container = document.getElementById('canvas-container');
+      const w = container.clientWidth;
+      const h = container.clientHeight;
+      camera.aspect = w / h;
+      camera.updateProjectionMatrix();
+      renderer.setSize(w, h);
+    }
+
+    function animate() {
+      requestAnimationFrame(animate);
+      const t = Date.now() * 0.002;
+      if (sourceMesh) {
+        sourceMesh.children[0].scale.setScalar(1 + Math.sin(t * 3) * 0.15);
+      }
+      renderer.render(scene, camera);
+    }
+
+    init();
+  </script>
+</body>
+</html>
