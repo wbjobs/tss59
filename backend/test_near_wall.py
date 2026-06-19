@@ -161,7 +161,7 @@ def test_near_wall_comprehensive():
                     path_count += 1
 
                     try:
-                        image_pt, path_pts, path_len = compute_image_and_path(
+                        image_pt, path_pts, path_len, _ = compute_image_and_path(
                             tc['source'], tc['receiver'], r, image_n
                         )
 
@@ -254,7 +254,7 @@ def test_reflection_count_consistency():
                 if order == 0 or order > max_order:
                     continue
                 image_n = (nx, ny, nz)
-                _, pts, _ = compute_image_and_path(source, receiver, room, image_n)
+                _, pts, _, _ = compute_image_and_path(source, receiver, room, image_n)
                 n_reflect = len(pts) - 2
                 if n_reflect != order:
                     print(f"  ⚠️  n={image_n}: order={order}, actual_reflections={n_reflect}")

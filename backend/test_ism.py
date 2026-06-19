@@ -71,7 +71,7 @@ def test_path_computation():
     
     all_ok = True
     for image_n, desc in test_cases:
-        image_pt, path_pts, path_len = compute_image_and_path(source, receiver, room, image_n)
+        image_pt, path_pts, path_len, _ = compute_image_and_path(source, receiver, room, image_n)
         order = sum(abs(x) for x in image_n)
         
         print(f"\n{desc} (n={image_n}, order={order}):")

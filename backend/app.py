@@ -90,7 +90,7 @@ def compute_image_and_path(source, receiver, room_dims, image_n):
         S = (Sx, Sy, Sz)
         R = (Rx, Ry, Rz)
         image_point = (float(Ix), float(Iy), float(Iz))
-        return image_point, [S, R], 0.0
+        return image_point, [S, R], 0.0, []
 
     crossings = []
     L_list = [Lx, Ly, Lz]
@@ -116,18 +116,18 @@ def compute_image_and_path(source, receiver, room_dims, image_n):
             t = (plane - s_val) / dir_val
             if EPS_T < t < 1.0 - EPS_T:
                 pt = (Ix + t * dx, Iy + t * dy, Iz + t * dz)
-                crossings.append((t, pt))
+                crossings.append((t, axis_idx, k, pt))
 
     crossings.sort(key=lambda x: x[0])
 
     merged = []
-    for t, pt in crossings:
+    for t, axis_idx, k, pt in crossings:
         if merged:
-            prev_t, prev_pt = merged[-1]
+            prev_t, prev_axis, prev_k, prev_pt = merged[-1]
             if abs(t - prev_t) < EPS_MERGE:
                 if _dist2(pt, prev_pt) < EPS_MERGE * EPS_MERGE:
                     continue
-        merged.append((t, pt))
+        merged.append((t, axis_idx, k, pt))
 
     min_dim = min(Lx, Ly, Lz)
     eps_degen = EPS_DEGEN_REL * min_dim
@@ -136,8 +136,11 @@ def compute_image_and_path(source, receiver, room_dims, image_n):
     S = (Sx, Sy, Sz)
     R = (Rx, Ry, Rz)
     path_points = [S]
+    reflection_faces = []
 
-    for t, pt_mirror in merged:
+    face_names = ['x_neg', 'x_pos', 'y_neg', 'y_pos', 'z_neg', 'z_pos']
+
+    for t, axis_idx, k, pt_mirror in merged:
         px = clamp(unfold_to_real(pt_mirror[0], Lx), 0.0, Lx)
         py = clamp(unfold_to_real(pt_mirror[1], Ly), 0.0, Ly)
         pz = clamp(unfold_to_real(pt_mirror[2], Lz), 0.0, Lz)
@@ -146,6 +149,14 @@ def compute_image_and_path(source, receiver, room_dims, image_n):
         last = path_points[-1]
         if _dist2(pt, last) < eps_degen2:
             continue
+
+        Li = L_list[axis_idx]
+        if k % 2 == 0:
+            face_idx = axis_idx * 2
+        else:
+            face_idx = axis_idx * 2 + 1
+        face_name = face_names[face_idx]
+        reflection_faces.append(face_name)
 
         path_points.append(pt)
 
@@ -158,7 +169,7 @@ def compute_image_and_path(source, receiver, room_dims, image_n):
         path_points = [S, R]
 
     image_point = (float(Ix), float(Iy), float(Iz))
-    return image_point, path_points, float(path_length)
+    return image_point, path_points, float(path_length), reflection_faces
 
 
 def _is_inside_room(point, room_dims, eps=EPS_BOUNDS):
@@ -223,6 +234,30 @@ def compute():
         receiver = tuple(float(x) for x in data['receiver'])
         max_order = int(data.get('max_order', 3))
 
+        default_absorption = data.get('absorption', {})
+        abs_x_neg = float(default_absorption.get('x_neg', 0.1))
+        abs_x_pos = float(default_absorption.get('x_pos', 0.1))
+        abs_y_neg = float(default_absorption.get('y_neg', 0.1))
+        abs_y_pos = float(default_absorption.get('y_pos', 0.1))
+        abs_z_neg = float(default_absorption.get('z_neg', 0.1))
+        abs_z_pos = float(default_absorption.get('z_pos', 0.1))
+
+        abs_x_neg = clamp(abs_x_neg, 0.0, 1.0)
+        abs_x_pos = clamp(abs_x_pos, 0.0, 1.0)
+        abs_y_neg = clamp(abs_y_neg, 0.0, 1.0)
+        abs_y_pos = clamp(abs_y_pos, 0.0, 1.0)
+        abs_z_neg = clamp(abs_z_neg, 0.0, 1.0)
+        abs_z_pos = clamp(abs_z_pos, 0.0, 1.0)
+
+        absorption_map = {
+            'x_neg': abs_x_neg,
+            'x_pos': abs_x_pos,
+            'y_neg': abs_y_neg,
+            'y_pos': abs_y_pos,
+            'z_neg': abs_z_neg,
+            'z_pos': abs_z_pos,
+        }
+
         Sx, Sy, Sz = source
         Sx = clamp(Sx, 0.0, Lx)
         Sy = clamp(Sy, 0.0, Ly)
@@ -255,7 +290,10 @@ def compute():
             'length': float(direct_length),
             'time': float(direct_time),
             'time_diff_ms': 0.0,
-            'type': 'direct'
+            'type': 'direct',
+            'pressure_ratio': 1.0,
+            'level_db': 0.0,
+            'reflection_faces': []
         }
         paths.append(direct_path)
 
@@ -269,7 +307,7 @@ def compute():
                         continue
 
                     image_n = (nx, ny, nz)
-                    image_point, path_points, path_length = compute_image_and_path(
+                    image_point, path_points, path_length, reflection_faces = compute_image_and_path(
                         source, receiver, room_dims, image_n
                     )
 
@@ -294,6 +332,13 @@ def compute():
                         continue
                     path_signatures.add(sig)
 
+                    pressure_ratio = 1.0
+                    for face in reflection_faces:
+                        abs_coeff = absorption_map.get(face, 0.1)
+                        pressure_ratio *= (1.0 - abs_coeff)
+
+                    level_db = 20.0 * math.log10(max(pressure_ratio, 1e-10)) if pressure_ratio > 0 else -100.0
+
                     paths.append({
                         'order': order,
                         'reflection_count': num_reflections,
@@ -303,7 +348,10 @@ def compute():
                         'length': float(path_length),
                         'time': float(travel_time),
                         'time_diff_ms': float(time_diff_ms),
-                        'type': f'reflection_{order}'
+                        'type': f'reflection_{order}',
+                        'pressure_ratio': float(pressure_ratio),
+                        'level_db': float(level_db),
+                        'reflection_faces': reflection_faces
                     })
 
         paths.sort(key=lambda p: p['time'])
@@ -315,6 +363,7 @@ def compute():
             'total_paths': len(paths),
             'source_clamped': list(source),
             'receiver_clamped': list(receiver),
+            'absorption': absorption_map,
             'stats': {
                 'total_image_sources': (2 * max_order + 1) ** 3 - 1,
                 'valid_reflections': len(paths) - 1,

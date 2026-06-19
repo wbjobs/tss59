@@ -146,6 +146,32 @@
         <label><input type="checkbox" id="chk-image" />镜像点</label>
       </div>
 
+      <h2>🔊 墙面吸声系数</h2>
+      <div class="control-group">
+        <label>左墙 (x=0) <span id="val-abs-xneg">0.10</span></label>
+        <input type="range" id="input-abs-xneg" min="0" max="1" step="0.01" value="0.1" />
+      </div>
+      <div class="control-group">
+        <label>右墙 (x=L) <span id="val-abs-xpos">0.10</span></label>
+        <input type="range" id="input-abs-xpos" min="0" max="1" step="0.01" value="0.1" />
+      </div>
+      <div class="control-group">
+        <label>地面 (y=0) <span id="val-abs-yneg">0.10</span></label>
+        <input type="range" id="input-abs-yneg" min="0" max="1" step="0.01" value="0.1" />
+      </div>
+      <div class="control-group">
+        <label>天花板 (y=L) <span id="val-abs-ypos">0.10</span></label>
+        <input type="range" id="input-abs-ypos" min="0" max="1" step="0.01" value="0.1" />
+      </div>
+      <div class="control-group">
+        <label>前墙 (z=0) <span id="val-abs-zneg">0.10</span></label>
+        <input type="range" id="input-abs-zneg" min="0" max="1" step="0.01" value="0.1" />
+      </div>
+      <div class="control-group">
+        <label>后墙 (z=L) <span id="val-abs-zpos">0.10</span></label>
+        <input type="range" id="input-abs-zpos" min="0" max="1" step="0.01" value="0.1" />
+      </div>
+
       <button class="btn" id="btn-compute">🚀 计算反射路径</button>
 
       <h2>📊 路径结果 <span id="path-count" style="font-weight:normal; color:#888; font-size:12px;"></span></h2>
@@ -193,7 +219,15 @@
       height: 3,
       depth: 4,
       source: new THREE.Vector3(1, 1.5, 1),
-      receiver: new THREE.Vector3(3.5, 1.5, 2.5)
+      receiver: new THREE.Vector3(3.5, 1.5, 2.5),
+      absorption: {
+        x_neg: 0.1,
+        x_pos: 0.1,
+        y_neg: 0.1,
+        y_pos: 0.1,
+        z_neg: 0.1,
+        z_pos: 0.1
+      }
     };
 
     function init() {
@@ -481,6 +515,24 @@
         });
       });
 
+      const absInputs = [
+        { id: 'input-abs-xneg', key: 'x_neg', valId: 'val-abs-xneg' },
+        { id: 'input-abs-xpos', key: 'x_pos', valId: 'val-abs-xpos' },
+        { id: 'input-abs-yneg', key: 'y_neg', valId: 'val-abs-yneg' },
+        { id: 'input-abs-ypos', key: 'y_pos', valId: 'val-abs-ypos' },
+        { id: 'input-abs-zneg', key: 'z_neg', valId: 'val-abs-zneg' },
+        { id: 'input-abs-zpos', key: 'z_pos', valId: 'val-abs-zpos' }
+      ];
+
+      absInputs.forEach(({ id, key, valId }) => {
+        const el = document.getElementById(id);
+        const valEl = document.getElementById(valId);
+        el.addEventListener('input', () => {
+          state.absorption[key] = parseFloat(el.value);
+          valEl.textContent = state.absorption[key].toFixed(2);
+        });
+      });
+
       document.getElementById('btn-compute').addEventListener('click', computePaths);
 
       ['chk-direct', 'chk-order1', 'chk-order2', 'chk-order3', 'chk-image'].forEach(id => {
@@ -509,6 +561,7 @@
         room: { width: state.width, height: state.height, depth: state.depth },
         source: [state.source.x, state.source.y, state.source.z],
         receiver: [state.receiver.x, state.receiver.y, state.receiver.z],
+        absorption: state.absorption,
         max_order: 3
       };
 
@@ -558,6 +611,27 @@
       return colors[order] || (isDim ? 0x444444 : 0x999999);
     }
 
+    function getPathOpacity(path, isActive) {
+      const pressure = path.pressure_ratio !== undefined ? path.pressure_ratio : 1.0;
+      if (isActive) {
+        return Math.max(0.6, Math.min(1.0, 0.6 + pressure * 0.4));
+      } else {
+        return Math.max(0.08, pressure * 0.7);
+      }
+    }
+
+    function getPathColor(path, isActive) {
+      const pressure = path.pressure_ratio !== undefined ? path.pressure_ratio : 1.0;
+      const baseColor = getOrderColor(path.order, !isActive);
+      if (isActive || pressure >= 0.8) {
+        return baseColor;
+      }
+      const c = new THREE.Color(baseColor);
+      const brightness = 0.3 + pressure * 0.7;
+      c.multiplyScalar(brightness);
+      return c.getHex();
+    }
+
     function renderAllPaths() {
       pathObjects.forEach(o => scene.remove(o));
       imagePointObjects.forEach(o => scene.remove(o));
@@ -576,14 +650,15 @@
         const show = showMap[path.order];
         if (!show) return;
         const isActive = idx === activePathIndex;
-        const opacity = isActive ? 1.0 : 0.35;
+        const opacity = getPathOpacity(path, isActive);
+        const lineColor = getPathColor(path, isActive);
         const lineWidth = isActive ? 0.04 : 0.015;
 
         const pts = path.path_points.map(p => new THREE.Vector3(p[0], p[1], p[2]));
         for (let i = 0; i < pts.length - 1; i++) {
           const segGeom = new THREE.BufferGeometry().setFromPoints([pts[i], pts[i + 1]]);
           const segMat = new THREE.LineBasicMaterial({
-            color: getOrderColor(path.order, !isActive),
+            color: lineColor,
             transparent: true,
             opacity: opacity
           });
@@ -605,7 +680,7 @@
           const tubeMat = new THREE.MeshBasicMaterial({
             color: getOrderColor(path.order),
             transparent: true,
-            opacity: 0.6
+            opacity: 0.7
           });
           const tube = new THREE.Mesh(tubeGeom, tubeMat);
           scene.add(tube);
@@ -613,12 +688,14 @@
         }
 
         if (path.order > 0) {
+          const pressure = path.pressure_ratio !== undefined ? path.pressure_ratio : 1.0;
+          const hitScale = 0.6 + pressure * 0.4;
           for (let i = 1; i < pts.length - 1; i++) {
-            const hitGeom = new THREE.SphereGeometry(isActive ? 0.07 : 0.04, 12, 12);
+            const hitGeom = new THREE.SphereGeometry((isActive ? 0.07 : 0.04) * hitScale, 12, 12);
             const hitMat = new THREE.MeshBasicMaterial({
               color: getOrderColor(path.order),
               transparent: true,
-              opacity: isActive ? 0.9 : 0.5
+              opacity: isActive ? 0.9 : (0.3 + pressure * 0.5)
             });
             const hit = new THREE.Mesh(hitGeom, hitMat);
             hit.position.copy(pts[i]);
@@ -681,6 +758,11 @@
 
         const td = path.time_diff_ms.toFixed(2);
         const len = path.length.toFixed(3);
+        const pressure = path.pressure_ratio !== undefined ? path.pressure_ratio : 1.0;
+        const levelDb = path.level_db !== undefined ? path.level_db : 0.0;
+
+        const pressurePct = Math.round(pressure * 100);
+        const barWidth = Math.max(2, pressurePct);
 
         item.innerHTML = `
           <div>
@@ -691,7 +773,14 @@
             <span>⏱ Δt = <b style="color:#fff;">${td} ms</b></span>
             <span>📏 ${len} m</span>
           </div>
-          ${path.order > 0 && path.image_n ? `<div class="path-meta" style="color:#888;">镜像索引: [${path.image_n.join(', ')}]</div>` : ''}
+          <div class="path-meta">
+            <span>🔊 声压: <b style="color:${pressure > 0.5 ? '#4caf50' : pressure > 0.2 ? '#ff9800' : '#f44336'};">${pressurePct}%</b></span>
+            <span>📉 ${levelDb.toFixed(1)} dB</span>
+          </div>
+          <div style="margin-top:6px; height:4px; background:#0f3460; border-radius:2px; overflow:hidden;">
+            <div style="height:100%; width:${barWidth}%; background:${pressure > 0.5 ? '#4caf50' : pressure > 0.2 ? '#ff9800' : '#f44336'}; transition: width 0.3s;"></div>
+          </div>
+          ${path.order > 0 && path.image_n ? `<div class="path-meta" style="color:#888; margin-top:4px;">镜像索引: [${path.image_n.join(', ')}]</div>` : ''}
         `;
 
         item.addEventListener('click', () => {
